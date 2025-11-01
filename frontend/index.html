@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Matrix - Fast Multiplayer Word Battles</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="landing-page">
+    <div class="container">
+        <div class="hero">
+            <h1 class="title">
+                <span class="title-word">WORD</span>
+                <span class="title-matrix">MATRIX</span>
+            </h1>
+            <p class="tagline">Fast multiplayer word battles — auto-scored, real-time, no voting.</p>
+        </div>
+
+        <div class="actions">
+            <div class="card">
+                <h2>Create Room</h2>
+                <p>Host a new game and invite friends</p>
+                <button id="createRoomBtn" class="btn btn-primary">
+                    Create New Room
+                </button>
+            </div>
+
+            <div class="card">
+                <h2>Join Room</h2>
+                <p>Enter a room code to join</p>
+                <input 
+                    type="text" 
+                    id="roomCodeInput" 
+                    placeholder="Enter room code (e.g., ABC123)"
+                    maxlength="10"
+                    class="input"
+                >
+                <input 
+                    type="text" 
+                    id="usernameInput" 
+                    placeholder="Your username"
+                    maxlength="20"
+                    class="input"
+                >
+                <button id="joinRoomBtn" class="btn btn-secondary">
+                    Join Room
+                </button>
+            </div>
+        </div>
+
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Connecting to server...</p>
+        </div>
+
+        <div id="error" class="error hidden"></div>
+
+        <div class="features">
+            <h3>How to Play</h3>
+            <div class="feature-grid">
+                <div class="feature">
+                    <div class="feature-icon">🎯</div>
+                    <h4>Create Words</h4>
+                    <p>Use the random letters to form valid words</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">⚡</div>
+                    <h4>Speed Matters</h4>
+                    <p>Submit quickly for bonus points and timing multiplier</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🏆</div>
+                    <h4>Score High</h4>
+                    <p>Longer words, faster submissions, and originality earn more points</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">👥</div>
+                    <h4>Compete Live</h4>
+                    <p>Real-time leaderboard shows top 10 players each round</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'https://your-app-name.onrender.com'; // ⚠️ UPDATE THIS
+
+        document.getElementById('createRoomBtn').addEventListener('click', async () => {
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            
+            loading.classList.remove('hidden');
+            error.classList.add('hidden');
+            
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/createRoom`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (!response.ok) throw new Error('Failed to create room');
+                
+                const data = await response.json();
+                localStorage.setItem('hostCode', data.hostCode);
+                window.location.href = `game.html?room=${data.roomId}&host=true`;
+                
+            } catch (err) {
+                loading.classList.add('hidden');
+                error.textContent = 'Failed to create room. Server may be waking up, try again in 30 seconds.';
+                error.classList.remove('hidden');
+                console.error(err);
+            }
+        });
+
+        document.getElementById('joinRoomBtn').addEventListener('click', () => {
+            const roomCode = document.getElementById('roomCodeInput').value.trim().toUpperCase();
+            const username = document.getElementById('usernameInput').value.trim();
+            const error = document.getElementById('error');
+            
+            error.classList.add('hidden');
+            
+            if (!roomCode) {
+                error.textContent = 'Please enter a room code';
+                error.classList.remove('hidden');
+                return;
+            }
+            
+            if (!username) {
+                error.textContent = 'Please enter a username';
+                error.classList.remove('hidden');
+                return;
+            }
+            
+            localStorage.setItem('username', username);
+            window.location.href = `game.html?room=${roomCode}`;
+        });
+
+        // Allow Enter key to join
+        document.getElementById('usernameInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('joinRoomBtn').click();
+            }
+        });
+    </script>
+</body>
+</html>
