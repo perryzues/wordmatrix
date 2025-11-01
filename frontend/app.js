@@ -1,5 +1,5 @@
 // frontend/app.js
-const BACKEND_URL = 'https://your-app-name.onrender.com'; // ⚠️ UPDATE THIS
+const BACKEND_URL = 'https://word-matrix-backend.onrender.com';
 
 // Get URL parameters
 const urlParams = new URLSearchParams(window.location.search);
@@ -342,4 +342,5 @@ function showScreen(screenName) {
     if (screens[screenName]) {
         screens[screenName].classList.remove('hidden');
     }
+
 }
