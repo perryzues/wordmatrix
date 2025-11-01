@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Matrix - Game Room</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="game-page">
+    <!-- Lobby Screen -->
+    <div id="lobbyScreen" class="screen">
+        <div class="container">
+            <h1 class="room-title">Room: <span id="roomCode"></span></h1>
+            
+            <div id="hostControls" class="host-controls hidden">
+                <h2>Host Settings</h2>
+                <div class="settings-grid">
+                    <div class="setting">
+                        <label for="roundsInput">Number of Rounds:</label>
+                        <input type="number" id="roundsInput" min="1" max="20" value="10" class="input">
+                    </div>
+                    <div class="setting">
+                        <label for="durationInput">Round Duration (seconds):</label>
+                        <input type="number" id="durationInput" min="10" max="60" value="15" class="input">
+                    </div>
+                </div>
+                <button id="startGameBtn" class="btn btn-primary">Start Game</button>
+            </div>
+
+            <div class="players-list">
+                <h3>Players (<span id="playerCount">0</span>)</h3>
+                <div id="playersList"></div>
+            </div>
+
+            <div class="share-section">
+                <p>Share this link with friends:</p>
+                <div class="share-link">
+                    <input type="text" id="shareLink" readonly class="input">
+                    <button id="copyLinkBtn" class="btn btn-secondary">Copy</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="gameScreen" class="screen hidden">
+        <div class="game-container">
+            <!-- Top Bar -->
+            <div class="game-header">
+                <div class="round-info">
+                    Round <span id="currentRound">1</span>/<span id="totalRounds">10</span>
+                </div>
+                <div class="timer-container">
+                    <div class="timer-bar">
+                        <div id="timerFill" class="timer-fill"></div>
+                    </div>
+                    <div id="timerText" class="timer-text">15s</div>
+                </div>
+            </div>
+
+            <!-- Letters Display -->
+            <div class="letters-container">
+                <div id="lettersDisplay" class="letters-display"></div>
+            </div>
+
+            <!-- Word Input -->
+            <div class="input-container">
+                <input 
+                    type="text" 
+                    id="wordInput" 
+                    placeholder="Type your word..."
+                    class="word-input"
+                    autocomplete="off"
+                    autocapitalize="off"
+                >
+                <button id="submitBtn" class="btn btn-submit">Submit</button>
+            </div>
+
+            <div id="submissionStatus" class="submission-status hidden"></div>
+
+            <!-- Best Word Display -->
+            <div id="bestWordDisplay" class="best-word-display hidden">
+                <div class="best-word-label">🏆 Round Best:</div>
+                <div id="bestWordContent"></div>
+            </div>
+
+            <!-- Leaderboard -->
+            <div class="leaderboard-container">
+                <button id="toggleLeaderboard" class="toggle-leaderboard">
+                    📊 Top 10 Leaderboard
+                </button>
+                <div id="leaderboard" class="leaderboard collapsed">
+                    <div class="leaderboard-header">
+                        <h3>Top 10 Players</h3>
+                        <button class="close-leaderboard">×</button>
+                    </div>
+                    <div id="leaderboardList" class="leaderboard-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scoring Screen -->
+    <div id="scoringScreen" class="screen hidden">
+        <div class="container">
+            <div class="scoring-animation">
+                <div class="spinner"></div>
+                <h2>Calculating Scores...</h2>
+                <p>Finding the best word of the round</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="gameOverScreen" class="screen hidden">
+        <div class="container">
+            <h1 class="game-over-title">🎉 Game Over! 🎉</h1>
+            
+            <div class="final-leaderboard">
+                <h2>Final Rankings</h2>
+                <div id="finalLeaderboard"></div>
+            </div>
+
+            <div class="game-over-actions">
+                <button id="newGameBtn" class="btn btn-primary">Create New Game</button>
+                <button id="backHomeBtn" class="btn btn-secondary">Back to Home</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="connectionError" class="connection-error hidden">
+        <p>⚠️ Connection lost. Reconnecting...</p>
+    </div>
+
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
