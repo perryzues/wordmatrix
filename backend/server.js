@@ -5,22 +5,56 @@ const { Server } = require('socket.io');
 const Redis = require('ioredis');
 const { Pool } = require('pg');
 const crypto = require('crypto');
+const fs = require('fs').promises;
+const path = require('path');
 const { calculateScore, validateWord } = require('./scoring');
-const { loadDictionary } = require('./dictionary');
+const { loadDictionary, generateDictionaryFile } = require('./dictionary');
 
 const app = express();
 const httpServer = createServer(app);
 
-// Initialize Redis
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
+// Initialize Redis with TLS support for Upstash
+const redisUrl = process.env.REDIS_URL 
+  ? (process.env.REDIS_URL.startsWith('redis://') 
+      ? process.env.REDIS_URL.replace('redis://', 'rediss://') 
+      : process.env.REDIS_URL)
+  : 'redis://localhost:6379';
+
+const redis = new Redis(redisUrl, {
   maxRetriesPerRequest: 3,
-  retryStrategy: (times) => Math.min(times * 50, 2000)
+  retryStrategy: (times) => {
+    if (times > 3) return null;
+    return Math.min(times * 50, 2000);
+  },
+  tls: redisUrl.startsWith('rediss://') ? {
+    rejectUnauthorized: false
+  } : undefined,
+  reconnectOnError: (err) => {
+    console.error('Redis error:', err.message);
+    return true;
+  }
+});
+
+redis.on('connect', () => {
+  console.log('✅ Connected to Redis');
+});
+
+redis.on('error', (err) => {
+  console.error('❌ Redis connection error:', err.message);
 });
 
 // Initialize PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+pool.on('connect', () => {
+  console.log('✅ Connected to PostgreSQL');
+});
+
+pool.on('error', (err) => {
+  console.error('❌ PostgreSQL error:', err.message);
 });
 
 // CORS configuration
@@ -41,11 +75,28 @@ app.use((req, res, next) => {
   next();
 });
 
-// Load dictionary on startup
+// Load or generate dictionary on startup
 let dictionary;
 (async () => {
-  dictionary = await loadDictionary();
-  console.log(`Dictionary loaded with ${dictionary.size} words`);
+  try {
+    const wordsPath = path.join(__dirname, 'words.json');
+    try {
+      await fs.access(wordsPath);
+      console.log('✅ Dictionary file found');
+    } catch {
+      console.log('⚠️  Dictionary not found, generating...');
+      await generateDictionaryFile();
+      console.log('✅ Dictionary generated');
+    }
+    
+    dictionary = await loadDictionary();
+    console.log(`✅ Dictionary loaded with ${dictionary.size} words`);
+  } catch (error) {
+    console.error('❌ Dictionary error:', error);
+    // Use fallback minimal dictionary
+    dictionary = new Set(['cat', 'dog', 'bird', 'fish', 'tree', 'star', 'water', 'earth', 'fire']);
+    console.log('⚠️  Using fallback dictionary with 9 words');
+  }
 })();
 
 // Helper functions
@@ -71,7 +122,29 @@ const generateLetters = (count = 4) => {
 
 // REST Endpoints
 app.get('/', (req, res) => {
-  res.json({ status: 'Word Matrix Server Running', version: '1.0.0' });
+  res.json({ 
+    status: 'Word Matrix Server Running', 
+    version: '1.0.0',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/health', async (req, res) => {
+  try {
+    await redis.ping();
+    await pool.query('SELECT 1');
+    res.json({ 
+      status: 'healthy',
+      redis: 'connected',
+      database: 'connected',
+      dictionary: dictionary ? dictionary.size : 0
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'unhealthy',
+      error: error.message 
+    });
+  }
 });
 
 app.post('/api/createRoom', async (req, res) => {
@@ -86,9 +159,10 @@ app.post('/api/createRoom', async (req, res) => {
     
     await redis.hset(`room:${roomId}`, 'hostCode', hostCode, 'rounds', 10, 'roundDuration', 15, 'currentRound', 0);
     
+    console.log(`✅ Room created: ${roomId}`);
     res.json({ roomId, hostCode });
   } catch (error) {
-    console.error('Error creating room:', error);
+    console.error('❌ Error creating room:', error);
     res.status(500).json({ error: 'Failed to create room' });
   }
 });
@@ -99,15 +173,20 @@ app.get('/api/room/:id', async (req, res) => {
     if (!roomData || !roomData.hostCode) {
       return res.status(404).json({ error: 'Room not found' });
     }
-    res.json({ exists: true, rounds: roomData.rounds, roundDuration: roomData.roundDuration });
+    res.json({ 
+      exists: true, 
+      rounds: parseInt(roomData.rounds) || 10, 
+      roundDuration: parseInt(roomData.roundDuration) || 15 
+    });
   } catch (error) {
+    console.error('❌ Error fetching room:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
-  console.log(`Socket connected: ${socket.id}`);
+  console.log(`🔌 Socket connected: ${socket.id}`);
   
   let currentRoom = null;
   let username = null;
@@ -139,10 +218,10 @@ io.on('connection', (socket) => {
       const players = Object.values(playersData).map(p => JSON.parse(p));
       
       io.to(roomId).emit('roomJoined', { players, socketId: socket.id });
-      console.log(`${username} joined room ${roomId}`);
+      console.log(`👤 ${username} joined room ${roomId}`);
       
     } catch (error) {
-      console.error('Join room error:', error);
+      console.error('❌ Join room error:', error);
       socket.emit('error', { code: 'JOIN_FAILED', message: 'Failed to join room' });
     }
   });
@@ -158,9 +237,10 @@ io.on('connection', (socket) => {
       
       await redis.hset(`room:${currentRoom}`, 'rounds', rounds, 'roundDuration', roundDuration);
       io.to(currentRoom).emit('settingsUpdated', { rounds, roundDuration });
+      console.log(`⚙️  Settings updated: ${rounds} rounds, ${roundDuration}s each`);
       
     } catch (error) {
-      console.error('Settings error:', error);
+      console.error('❌ Settings error:', error);
     }
   });
   
@@ -174,10 +254,11 @@ io.on('connection', (socket) => {
       }
       
       await redis.hset(`room:${currentRoom}`, 'currentRound', 1, 'gameStarted', Date.now());
+      console.log(`🎮 Game started in room ${currentRoom}`);
       startRound(currentRoom, 1);
       
     } catch (error) {
-      console.error('Start game error:', error);
+      console.error('❌ Start game error:', error);
     }
   });
   
@@ -203,14 +284,15 @@ io.on('connection', (socket) => {
       }));
       
       socket.emit('submissionReceived', { word });
+      console.log(`📝 ${username} submitted: ${word}`);
       
     } catch (error) {
-      console.error('Submit error:', error);
+      console.error('❌ Submit error:', error);
     }
   });
   
   socket.on('disconnect', async () => {
-    console.log(`Socket disconnected: ${socket.id}`);
+    console.log(`🔌 Socket disconnected: ${socket.id}`);
     if (currentRoom) {
       await redis.hdel(`room:${currentRoom}:players`, socket.id);
       const playersData = await redis.hgetall(`room:${currentRoom}:players`);
@@ -242,16 +324,19 @@ async function startRound(roomId, roundNumber) {
       serverStartTime: startTime
     });
     
+    console.log(`🎲 Round ${roundNumber}/${totalRounds} started with letters: ${letters.join('')}`);
+    
     setTimeout(() => endRound(roomId, roundNumber, letters, roundDuration, totalRounds), roundDuration * 1000 + 2000);
     
   } catch (error) {
-    console.error('Start round error:', error);
+    console.error('❌ Start round error:', error);
   }
 }
 
 async function endRound(roomId, roundNumber, letters, roundDuration, totalRounds) {
   try {
     io.to(roomId).emit('scoringInProgress');
+    console.log(`📊 Scoring round ${roundNumber}...`);
     
     const submissions = await redis.hgetall(`room:${roomId}:round:${roundNumber}:submissions`);
     const playersData = await redis.hgetall(`room:${roomId}:players`);
@@ -281,7 +366,7 @@ async function endRound(roomId, roundNumber, letters, roundDuration, totalRounds
     
     for (const [socketId, dataStr] of Object.entries(submissions)) {
       const data = JSON.parse(dataStr);
-      const player = JSON.parse(playersData[socketId]);
+      const player = JSON.parse(playersData[socketId] || '{"username":"Unknown","totalPoints":0}');
       
       const isDuplicate = wordCounts[data.word] > 1;
       const isFirstDuplicate = isDuplicate && wordFirstSubmitters[data.word].socketId === socketId;
@@ -339,30 +424,50 @@ async function endRound(roomId, roundNumber, letters, roundDuration, totalRounds
     io.to(roomId).emit('roundResults', { results, bestWord });
     io.to(roomId).emit('leaderboardUpdate', { top10, bestWord });
     
+    console.log(`✅ Round ${roundNumber} complete. Best word: ${bestWord?.word || 'none'} (${bestWord?.roundPoints || 0} pts)`);
+    
     // Start next round or end game
     if (roundNumber < totalRounds) {
       await redis.hset(`room:${roomId}`, 'currentRound', roundNumber + 1);
       setTimeout(() => startRound(roomId, roundNumber + 1), 3000);
     } else {
       io.to(roomId).emit('gameOver', { finalTop10: top10 });
+      console.log(`🏁 Game over in room ${roomId}`);
       
       // Save to database
       for (const player of allPlayers) {
-        await pool.query(
-          'INSERT INTO game_results (room_id, username, total_points, rounds_played) VALUES ($1, $2, $3, $4)',
-          [roomId, player.username, player.totalPoints, totalRounds]
-        );
+        try {
+          await pool.query(
+            'INSERT INTO game_results (room_id, username, total_points, rounds_played) VALUES ($1, $2, $3, $4)',
+            [roomId, player.username, player.totalPoints, totalRounds]
+          );
+        } catch (dbError) {
+          console.error('❌ Error saving results:', dbError.message);
+        }
       }
     }
     
   } catch (error) {
-    console.error('End round error:', error);
+    console.error('❌ End round error:', error);
   }
 }
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('🛑 SIGTERM received, shutting down gracefully...');
+  httpServer.close(() => {
+    console.log('✅ HTTP server closed');
+    redis.disconnect();
+    pool.end();
+    process.exit(0);
+  });
+});
 
 // Start server
 const PORT = process.env.PORT || 10000;
 httpServer.listen(PORT, () => {
-  console.log(`Word Matrix server running on port ${PORT}`);
-  console.log(`Frontend URL: ${process.env.FRONTEND_URL}`);
+  console.log(`🚀 Word Matrix server running on port ${PORT}`);
+  console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'Not set'}`);
+  console.log(`📝 Redis: ${redisUrl.includes('upstash') ? 'Upstash' : 'Local'}`);
+  console.log(`💾 Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
 });
