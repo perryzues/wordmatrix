@@ -7,8 +7,8 @@ const { Pool } = require('pg');
 const crypto = require('crypto');
 const fs = require('fs').promises;
 const path = require('path');
-const { calculateScore, validateWord } = require('./scoring');
-const { loadDictionary, generateDictionaryFile } = require('./dictionary');
+const { calculateScore, calculateTotalScore, validateWord, canFormWord } = require('./scoring');
+const { loadDictionary, loadMainWords, generateDictionaryFile } = require('./dictionary');
 
 const app = express();
 const httpServer = createServer(app);
@@ -43,19 +43,27 @@ redis.on('error', (err) => {
   console.error('❌ Redis connection error:', err.message);
 });
 
-// Initialize PostgreSQL
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-});
+// Initialize PostgreSQL with connection pooling
+let pool = null;
+if (process.env.DATABASE_URL) {
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
 
-pool.on('connect', () => {
-  console.log('✅ Connected to PostgreSQL');
-});
+  pool.on('connect', () => {
+    console.log('✅ Connected to PostgreSQL');
+  });
 
-pool.on('error', (err) => {
-  console.error('❌ PostgreSQL error:', err.message);
-});
+  pool.on('error', (err) => {
+    console.error('❌ PostgreSQL error:', err.message);
+  });
+} else {
+  console.log('⚠️  Database not configured - game results won\'t be saved');
+}
 
 // CORS configuration
 const io = new Server(httpServer, {
@@ -75,8 +83,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Load or generate dictionary on startup
+// Load or generate dictionary and main words on startup
 let dictionary;
+let mainWordsData;
 (async () => {
   try {
     const wordsPath = path.join(__dirname, 'words.json');
@@ -91,11 +100,17 @@ let dictionary;
     
     dictionary = await loadDictionary();
     console.log(`✅ Dictionary loaded with ${dictionary.size} words`);
+    
+    mainWordsData = await loadMainWords();
+    console.log(`✅ Main words loaded: ${Object.keys(mainWordsData).length} words`);
   } catch (error) {
     console.error('❌ Dictionary error:', error);
     // Use fallback minimal dictionary
-    dictionary = new Set(['cat', 'dog', 'bird', 'fish', 'tree', 'star', 'water', 'earth', 'fire']);
-    console.log('⚠️  Using fallback dictionary with 9 words');
+    dictionary = new Set(['sent', 'tent', 'teen', 'seen', 'nest', 'net', 'ten', 'set', 'sit', 'tin']);
+    mainWordsData = {
+      "sentient": ["sent", "tent", "teen", "seen", "nest", "net", "ten", "set", "sit", "tin"]
+    };
+    console.log('⚠️  Using fallback dictionary');
   }
 })();
 
@@ -103,21 +118,10 @@ let dictionary;
 const generateRoomId = () => crypto.randomBytes(3).toString('hex').toUpperCase();
 const generateHostCode = () => crypto.randomBytes(6).toString('hex').toUpperCase();
 const sanitizeUsername = (username) => username.trim().substring(0, 50).replace(/[<>]/g, '');
-const generateLetters = (count = 4) => {
-  const vowels = 'AEIOU';
-  const consonants = 'BCDFGHJKLMNPQRSTVWXYZ';
-  const letters = [];
-  
-  // Ensure at least one vowel
-  letters.push(vowels[Math.floor(Math.random() * vowels.length)]);
-  
-  for (let i = 1; i < count; i++) {
-    const useVowel = Math.random() > 0.6;
-    const pool = useVowel ? vowels : consonants;
-    letters.push(pool[Math.floor(Math.random() * pool.length)]);
-  }
-  
-  return letters.sort(() => Math.random() - 0.5);
+const selectRandomMainWord = () => {
+  const words = Object.keys(mainWordsData || {});
+  if (words.length === 0) return 'sentient';
+  return words[Math.floor(Math.random() * words.length)];
 };
 
 // REST Endpoints
@@ -132,11 +136,21 @@ app.get('/', (req, res) => {
 app.get('/health', async (req, res) => {
   try {
     await redis.ping();
-    await pool.query('SELECT 1');
+    
+    let dbStatus = 'not configured';
+    if (pool) {
+      try {
+        await pool.query('SELECT 1');
+        dbStatus = 'connected';
+      } catch (dbError) {
+        dbStatus = 'error: ' + dbError.message;
+      }
+    }
+    
     res.json({ 
-      status: 'healthy',
+      status: pool && dbStatus !== 'connected' ? 'degraded' : 'healthy',
       redis: 'connected',
-      database: 'connected',
+      database: dbStatus,
       dictionary: dictionary ? dictionary.size : 0
     });
   } catch (error) {
@@ -152,10 +166,17 @@ app.post('/api/createRoom', async (req, res) => {
     const roomId = generateRoomId();
     const hostCode = generateHostCode();
     
-    await pool.query(
-      'INSERT INTO rooms (id, host_code, rounds, round_duration) VALUES ($1, $2, $3, $4)',
-      [roomId, hostCode, 10, 15]
-    );
+    // Save to database if available
+    if (pool) {
+      try {
+        await pool.query(
+          'INSERT INTO rooms (id, host_code, rounds, round_duration) VALUES ($1, $2, $3, $4)',
+          [roomId, hostCode, 10, 15]
+        );
+      } catch (dbError) {
+        console.error('⚠️  Database save failed:', dbError.message);
+      }
+    }
     
     await redis.hset(`room:${roomId}`, 'hostCode', hostCode, 'rounds', 10, 'roundDuration', 15, 'currentRound', 0);
     
@@ -269,22 +290,41 @@ io.on('connection', (socket) => {
       const submissionTime = Date.now();
       const currentRound = await redis.hget(`room:${currentRoom}`, 'currentRound');
       const roundStartTime = await redis.hget(`room:${currentRoom}`, `round:${currentRound}:startTime`);
+      const mainWord = await redis.hget(`room:${currentRoom}`, `round:${currentRound}:mainWord`);
       
-      if (!roundStartTime) return;
+      if (!roundStartTime || !mainWord) return;
       
-      const alreadySubmitted = await redis.hexists(`room:${currentRoom}:round:${currentRound}:submissions`, socket.id);
-      if (alreadySubmitted) {
-        return socket.emit('error', { code: 'ALREADY_SUBMITTED', message: 'Already submitted for this round' });
+      const normalizedWord = word.toLowerCase().trim();
+      
+      // Check if this exact word was already submitted by this player
+      const playerSubmissions = await redis.hget(`room:${currentRoom}:round:${currentRound}:submissions`, socket.id);
+      const previousWords = playerSubmissions ? JSON.parse(playerSubmissions) : [];
+      
+      if (previousWords.some(sub => sub.word === normalizedWord)) {
+        return socket.emit('error', { code: 'DUPLICATE_SUBMISSION', message: 'You already submitted this word' });
       }
       
-      await redis.hset(`room:${currentRoom}:round:${currentRound}:submissions`, socket.id, JSON.stringify({
-        word: word.toLowerCase().trim(),
+      // Quick validation before accepting
+      const isValid = canFormWord(normalizedWord, mainWord) && validateWord(normalizedWord, dictionary);
+      
+      if (!isValid) {
+        return socket.emit('wordRejected', { 
+          word: normalizedWord, 
+          reason: !validateWord(normalizedWord, dictionary) ? 'Not in dictionary' : 'Cannot be formed from main word'
+        });
+      }
+      
+      // Add to submissions
+      previousWords.push({
+        word: normalizedWord,
         submissionTime,
         username
-      }));
+      });
       
-      socket.emit('submissionReceived', { word });
-      console.log(`📝 ${username} submitted: ${word}`);
+      await redis.hset(`room:${currentRoom}:round:${currentRound}:submissions`, socket.id, JSON.stringify(previousWords));
+      
+      socket.emit('wordAccepted', { word: normalizedWord, count: previousWords.length });
+      console.log(`📝 ${username} found: ${normalizedWord} (${previousWords.length} words total)`);
       
     } catch (error) {
       console.error('❌ Submit error:', error);
@@ -434,15 +474,17 @@ async function endRound(roomId, roundNumber, letters, roundDuration, totalRounds
       io.to(roomId).emit('gameOver', { finalTop10: top10 });
       console.log(`🏁 Game over in room ${roomId}`);
       
-      // Save to database
-      for (const player of allPlayers) {
-        try {
-          await pool.query(
-            'INSERT INTO game_results (room_id, username, total_points, rounds_played) VALUES ($1, $2, $3, $4)',
-            [roomId, player.username, player.totalPoints, totalRounds]
-          );
-        } catch (dbError) {
-          console.error('❌ Error saving results:', dbError.message);
+      // Save to database if available
+      if (pool) {
+        for (const player of allPlayers) {
+          try {
+            await pool.query(
+              'INSERT INTO game_results (room_id, username, total_points, rounds_played) VALUES ($1, $2, $3, $4)',
+              [roomId, player.username, player.totalPoints, totalRounds]
+            );
+          } catch (dbError) {
+            console.error('⚠️  Error saving results:', dbError.message);
+          }
         }
       }
     }
