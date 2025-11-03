@@ -1,5 +1,5 @@
 // frontend/app.js
-const BACKEND_URL = 'https://word-matrix-backend.onrender.com';
+const BACKEND_URL = 'https://word-matrix-backend.onrender.com'; // ⚠️ UPDATE THIS
 
 // Get URL parameters
 const urlParams = new URLSearchParams(window.location.search);
@@ -11,10 +11,10 @@ let socket = null;
 let gameState = {
     currentRound: 0,
     totalRounds: 10,
-    letters: [],
+    mainWord: '',
     roundDuration: 15,
     roundStartTime: 0,
-    submitted: false,
+    foundWords: [],
     timerInterval: null
 };
 
@@ -37,7 +37,7 @@ function initializeGame() {
     document.getElementById('roomCode').textContent = roomId;
     
     // Set up share link
-    const shareLink = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+    const shareLink = `${window.location.origin}${window.location.pathname.replace('game.html', '')}game.html?room=${roomId}`;
     document.getElementById('shareLink').value = shareLink;
     
     // Show host controls if host
@@ -75,9 +75,13 @@ function connectSocket() {
     });
     
     socket.on('error', (data) => {
-        alert(`Error: ${data.message}`);
-        if (data.code === 'ROOM_NOT_FOUND') {
-            window.location.href = 'index.html';
+        if (data.code === 'DUPLICATE_SUBMISSION') {
+            showSubmissionStatus(data.message, 'error');
+        } else {
+            alert(`Error: ${data.message}`);
+            if (data.code === 'ROOM_NOT_FOUND') {
+                window.location.href = 'index.html';
+            }
         }
     });
     
@@ -98,24 +102,31 @@ function connectSocket() {
         startNewRound(data);
     });
     
-    socket.on('submissionReceived', () => {
-        gameState.submitted = true;
-        showSubmissionStatus('✓ Word submitted!', 'success');
-        document.getElementById('submitBtn').disabled = true;
-        document.getElementById('wordInput').disabled = true;
+    socket.on('wordAccepted', ({ word, count }) => {
+        gameState.foundWords.push(word);
+        showSubmissionStatus(`✓ "${word.toUpperCase()}" accepted! (${count} words found)`, 'success');
+        updateFoundWordsList();
+        document.getElementById('wordInput').value = '';
+        document.getElementById('wordInput').focus();
+    });
+    
+    socket.on('wordRejected', ({ word, reason }) => {
+        showSubmissionStatus(`✗ "${word.toUpperCase()}": ${reason}`, 'error');
+        document.getElementById('wordInput').select();
     });
     
     socket.on('scoringInProgress', () => {
         showScreen('scoring');
     });
     
-    socket.on('roundResults', ({ results, bestWord }) => {
-        if (bestWord) {
-            displayBestWord(bestWord);
+    socket.on('roundResults', ({ results, bestWord, mostWords, possibleWords }) => {
+        console.log('Round complete! Possible words:', possibleWords);
+        if (bestWord || mostWords) {
+            displayRoundStats(bestWord, mostWords);
         }
     });
     
-    socket.on('leaderboardUpdate', ({ top10, bestWord }) => {
+    socket.on('leaderboardUpdate', ({ top10 }) => {
         updateLeaderboard(top10);
         showScreen('game');
     });
@@ -152,6 +163,11 @@ function setupEventListeners() {
         }
     });
     
+    // Auto-focus input when typing
+    document.getElementById('wordInput').addEventListener('input', (e) => {
+        e.target.value = e.target.value.toLowerCase();
+    });
+    
     // Toggle leaderboard
     document.getElementById('toggleLeaderboard').addEventListener('click', () => {
         document.getElementById('leaderboard').classList.toggle('collapsed');
@@ -184,13 +200,13 @@ function updatePlayersList(players) {
     `).join('');
 }
 
-function startNewRound({ letters, roundNumber, totalRounds, roundDuration, serverStartTime }) {
+function startNewRound({ mainWord, roundNumber, totalRounds, roundDuration, serverStartTime }) {
     gameState.currentRound = roundNumber;
     gameState.totalRounds = totalRounds;
-    gameState.letters = letters;
+    gameState.mainWord = mainWord;
     gameState.roundDuration = roundDuration;
     gameState.roundStartTime = serverStartTime;
-    gameState.submitted = false;
+    gameState.foundWords = [];
     
     showScreen('game');
     
@@ -198,19 +214,19 @@ function startNewRound({ letters, roundNumber, totalRounds, roundDuration, serve
     document.getElementById('currentRound').textContent = roundNumber;
     document.getElementById('totalRounds').textContent = totalRounds;
     
-    // Display letters
-    const lettersDisplay = document.getElementById('lettersDisplay');
-    lettersDisplay.innerHTML = letters.map((letter, idx) => `
-        <div class="letter-chip" style="animation-delay: ${idx * 0.1}s">${letter}</div>
-    `).join('');
+    // Display main word
+    const mainWordDisplay = document.getElementById('mainWordDisplay');
+    mainWordDisplay.textContent = mainWord;
     
-    // Reset input
+    // Reset UI
     document.getElementById('wordInput').value = '';
     document.getElementById('wordInput').disabled = false;
     document.getElementById('wordInput').focus();
     document.getElementById('submitBtn').disabled = false;
     document.getElementById('submissionStatus').classList.add('hidden');
-    document.getElementById('bestWordDisplay').classList.add('hidden');
+    document.getElementById('roundStatsDisplay').classList.add('hidden');
+    document.getElementById('foundWordsContainer').classList.add('hidden');
+    document.getElementById('wordsFoundCount').textContent = '0';
     
     // Start timer
     startTimer(roundDuration);
@@ -245,12 +261,9 @@ function startTimer(duration) {
 }
 
 function submitWord() {
-    if (gameState.submitted) return;
-    
     const word = document.getElementById('wordInput').value.trim().toLowerCase();
     
     if (!word) {
-        showSubmissionStatus('Please enter a word', 'error');
         return;
     }
     
@@ -267,16 +280,45 @@ function showSubmissionStatus(message, type) {
     status.textContent = message;
     status.className = `submission-status ${type}`;
     status.classList.remove('hidden');
+    
+    setTimeout(() => {
+        status.classList.add('hidden');
+    }, 3000);
 }
 
-function displayBestWord({ word, username, roundPoints }) {
-    const display = document.getElementById('bestWordDisplay');
-    const content = document.getElementById('bestWordContent');
+function updateFoundWordsList() {
+    const container = document.getElementById('foundWordsContainer');
+    const list = document.getElementById('foundWordsList');
+    const count = document.getElementById('wordsFoundCount');
     
-    content.innerHTML = `
-        <strong>"${word.toUpperCase()}"</strong> by ${username} 
-        <span style="color: var(--success)">(+${roundPoints.toFixed(1)} pts)</span>
-    `;
+    count.textContent = gameState.foundWords.length;
+    
+    if (gameState.foundWords.length > 0) {
+        container.classList.remove('hidden');
+        list.innerHTML = gameState.foundWords.map(word => `
+            <div class="found-word-chip">${word.toUpperCase()}</div>
+        `).join('');
+    }
+}
+
+function displayRoundStats(bestWord, mostWords) {
+    const display = document.getElementById('roundStatsDisplay');
+    const bestContent = document.getElementById('bestWordContent');
+    const mostContent = document.getElementById('mostWordsContent');
+    
+    if (bestWord) {
+        bestContent.innerHTML = `
+            <strong>"${bestWord.word.toUpperCase()}"</strong> by ${bestWord.username} 
+            <span style="color: var(--success)">(${bestWord.roundPoints} pts, ${bestWord.length} letters)</span>
+        `;
+    }
+    
+    if (mostWords && mostWords.count > 0) {
+        mostContent.innerHTML = `
+            <strong>${mostWords.players.join(', ')}</strong> 
+            <span style="color: var(--primary)">(${mostWords.count} words)</span>
+        `;
+    }
     
     display.classList.remove('hidden');
 }
@@ -289,7 +331,8 @@ function updateLeaderboard(top10) {
             <div class="rank-badge rank-${idx + 1}">${player.rank}</div>
             <div class="player-info">
                 <div class="player-name">${player.username}</div>
-                <div class="player-word">${player.lastWord || '—'}</div>
+                <div class="player-words">${(player.lastWords || []).slice(0, 3).join(', ').toUpperCase() || '—'}</div>
+                <div class="player-word-count">${player.wordCount || 0} words this round</div>
             </div>
             <div class="player-score">
                 <div class="total-points">${player.totalPoints.toFixed(1)}</div>
@@ -315,7 +358,7 @@ function displayGameOver(finalTop10) {
                 <div class="rank-badge rank-${idx + 1}">${medal || player.rank}</div>
                 <div class="player-info">
                     <div class="player-name">${player.username}</div>
-                    <div class="player-word">Final Score</div>
+                    <div class="player-word-count">Found ${player.wordCount || 0} words in final round</div>
                 </div>
                 <div class="player-score">
                     <div class="total-points">${player.totalPoints.toFixed(1)}</div>
@@ -342,5 +385,4 @@ function showScreen(screenName) {
     if (screens[screenName]) {
         screens[screenName].classList.remove('hidden');
     }
-
 }
