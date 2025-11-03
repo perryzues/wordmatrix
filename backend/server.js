@@ -349,24 +349,24 @@ async function startRound(roomId, roundNumber) {
     const roundDuration = parseInt(roomData.roundDuration) || 15;
     const totalRounds = parseInt(roomData.rounds) || 10;
     
-    const letters = generateLetters(4);
+    const mainWord = selectRandomMainWord();
     const startTime = Date.now();
     
     await redis.hset(`room:${roomId}`, `round:${roundNumber}:startTime`, startTime);
-    await redis.hset(`room:${roomId}`, `round:${roundNumber}:letters`, JSON.stringify(letters));
+    await redis.hset(`room:${roomId}`, `round:${roundNumber}:mainWord`, mainWord);
     await redis.del(`room:${roomId}:round:${roundNumber}:submissions`);
     
     io.to(roomId).emit('newRound', {
-      letters,
+      mainWord: mainWord.toUpperCase(),
       roundNumber,
       totalRounds,
       roundDuration,
       serverStartTime: startTime
     });
     
-    console.log(`🎲 Round ${roundNumber}/${totalRounds} started with letters: ${letters.join('')}`);
+    console.log(`🎲 Round ${roundNumber}/${totalRounds} started with main word: ${mainWord.toUpperCase()}`);
     
-    setTimeout(() => endRound(roomId, roundNumber, letters, roundDuration, totalRounds), roundDuration * 1000 + 2000);
+    setTimeout(() => endRound(roomId, roundNumber, mainWord, roundDuration, totalRounds), roundDuration * 1000 + 2000);
     
   } catch (error) {
     console.error('❌ Start round error:', error);
