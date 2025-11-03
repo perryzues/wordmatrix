@@ -24,11 +24,33 @@ async function loadDictionary() {
     console.warn('Using fallback minimal dictionary');
     return new Set([
       'cat', 'dog', 'bird', 'fish', 'tree', 'star', 'moon', 'sun',
-      'color', 'water', 'earth', 'fire', 'wind', 'stone', 'metal',
-      'table', 'chair', 'house', 'phone', 'computer', 'music', 'dance',
-      'create', 'destroy', 'build', 'break', 'start', 'finish', 'begin',
-      'apple', 'orange', 'banana', 'grape', 'lemon', 'peach', 'melon'
+      'ten', 'net', 'set', 'sit', 'tin', 'tie', 'inn', 'sin',
+      'sent', 'tent', 'teen', 'seen', 'nest', 'test', 'site'
     ]);
+  }
+}
+
+/**
+ * Loads main words with their subwords from main-words.json
+ */
+async function loadMainWords() {
+  try {
+    const mainWordsPath = path.join(__dirname, 'main-words.json');
+    const data = await fs.readFile(mainWordsPath, 'utf8');
+    const mainWords = JSON.parse(data);
+    
+    console.log(`Loaded ${Object.keys(mainWords).length} main words`);
+    return mainWords;
+    
+  } catch (error) {
+    console.error('Error loading main words:', error);
+    
+    // Fallback
+    return {
+      "sentient": ["sent", "tent", "teen", "seen", "nest", "nets", "tens", "net", "ten", "set", "sit", "tin", "tie", "inn", "sin"],
+      "intelligence": ["intelligent", "gene", "teen", "line", "net", "ten", "ice", "tin", "lit", "let", "lie", "leg", "inn"],
+      "learning": ["learn", "near", "real", "earl", "rain", "line", "lean", "nail", "gear", "rail"]
+    };
   }
 }
 
