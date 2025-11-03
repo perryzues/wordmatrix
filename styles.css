@@ -373,45 +373,123 @@ body {
     color: var(--primary);
 }
 
-/* Letters Display */
-.letters-container {
-    margin-bottom: 3rem;
+/* Main Word Display */
+.main-word-container {
+    margin-bottom: 2rem;
+    text-align: center;
 }
 
-.letters-display {
-    display: flex;
-    justify-content: center;
-    gap: 1rem;
-    flex-wrap: wrap;
+.main-word-label {
+    font-size: 1rem;
+    color: var(--gray);
+    margin-bottom: 1rem;
 }
 
-.letter-chip {
-    width: 80px;
-    height: 80px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 2.5rem;
+.main-word-display {
+    font-size: 3.5rem;
     font-weight: 900;
+    letter-spacing: 8px;
     background: linear-gradient(135deg, var(--primary), var(--secondary));
-    color: var(--dark);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 24px rgba(0, 245, 212, 0.3);
-    animation: letterPop 0.3s ease backwards;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-transform: uppercase;
+    padding: 1rem;
+    animation: pulse 2s ease-in-out infinite;
 }
 
-@keyframes letterPop {
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+}
+
+.words-found-count {
+    font-size: 1.2rem;
+    color: var(--success);
+    font-weight: 600;
+    margin-top: 0.5rem;
+}
+
+/* Found Words List */
+.found-words-container {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-bottom: 2rem;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.found-words-container h4 {
+    color: var(--primary);
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.found-words-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.found-word-chip {
+    background: linear-gradient(135deg, rgba(0, 245, 212, 0.1), rgba(131, 56, 236, 0.1));
+    border: 1px solid var(--primary);
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--primary);
+    animation: chipAppear 0.3s ease;
+}
+
+.found-word-chip.unique {
+    border-color: var(--success);
+    color: var(--success);
+    box-shadow: 0 0 10px rgba(6, 255, 165, 0.3);
+}
+
+@keyframes chipAppear {
     from {
-        transform: scale(0) rotate(-180deg);
+        transform: scale(0);
         opacity: 0;
     }
     to {
-        transform: scale(1) rotate(0);
+        transform: scale(1);
         opacity: 1;
     }
 }
 
-/* Word Input */
+/* Round Stats Display */
+.round-stats-display {
+    background: linear-gradient(135deg, rgba(251, 86, 7, 0.1), rgba(131, 56, 236, 0.1));
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    animation: slideIn 0.5s ease;
+}
+
+.stat-item {
+    margin-bottom: 1rem;
+}
+
+.stat-item:last-child {
+    margin-bottom: 0;
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    color: var(--gray);
+    margin-bottom: 0.3rem;
+}
+
+#bestWordContent, #mostWordsContent {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--accent);
+}
 .input-container {
     display: flex;
     gap: 1rem;
@@ -439,6 +517,12 @@ body {
     background: rgba(6, 255, 165, 0.1);
     border: 1px solid var(--success);
     color: var(--success);
+}
+
+.submission-status.error {
+    background: rgba(255, 0, 110, 0.1);
+    border: 1px solid var(--error);
+    color: var(--error);
 }
 
 /* Best Word Display */
@@ -581,9 +665,16 @@ body {
     font-size: 1.1rem;
 }
 
-.player-word {
-    font-size: 0.9rem;
+.player-words {
+    font-size: 0.85rem;
     color: var(--gray);
+    margin-top: 0.2rem;
+}
+
+.player-word-count {
+    font-size: 0.8rem;
+    color: var(--primary);
+    margin-top: 0.1rem;
 }
 
 .player-score {
